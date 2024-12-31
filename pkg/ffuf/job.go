@@ -51,8 +51,8 @@ type ResponseSignature struct {
     StatusCode    int64
     Size          int64
     Words         int64
+    Lines         int64
 }
-
 type ErrorTracker struct {
     ErrorCount    int
     MaxRetries    int
@@ -468,29 +468,53 @@ func (j *Job) runTask(input map[string][]byte, position int, retried bool) {
         return
     }
 
-    // Initialize response tracking if not already done
+	// Initialize response tracking if not already done
     if j.seenResponses == nil {
         j.seenResponses = make(map[ResponseSignature]bool)
     }
 
     // Create signature for this response
-    signature := ResponseSignature{
+    currentSignature := ResponseSignature{
         StatusCode: int64(resp.StatusCode),
         Size:      resp.ContentLength,
         Words:     resp.ContentWords,
+        Lines:     resp.ContentLines,  // Add the Lines field
     }
 
-    // Skip if we've seen this signature before
-    if j.seenResponses[signature] {
+    // Check for duplicates with more sophisticated logic
+    isDuplicate := false
+    for signature := range j.seenResponses {
+        // First check: Status codes must match
+        if signature.StatusCode != currentSignature.StatusCode {
+            continue
+        }
+
+        // Count matching attributes (Size, Words, Lines)
+        matchCount := 0
+        if signature.Size == currentSignature.Size {
+            matchCount++
+        }
+        if signature.Words == currentSignature.Words {
+            matchCount++
+        }
+        if signature.Lines == currentSignature.Lines {
+            matchCount++
+        }
+
+        // If 2 or more attributes match, consider it a duplicate
+        if matchCount >= 2 {
+            isDuplicate = true
+            break
+        }
+    }
+
+    // Skip if it's a duplicate
+    if isDuplicate {
         return
     }
 
     // Mark this signature as seen
-    j.seenResponses[signature] = true
-
-    if j.SpuriousErrorCounter > 0 {
-        j.resetSpuriousErrors()
-    }
+    j.seenResponses[currentSignature] = true
     
     // Rest of the existing code...
     if j.Config.StopOn403 || j.Config.StopOnAll {
