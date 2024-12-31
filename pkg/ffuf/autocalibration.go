@@ -43,6 +43,48 @@ func (j *Job) autoCalibrationStrings() map[string][]string {
 	return cInputs
 }
 
+
+
+func (j *Job) shouldSkipURL(host string) bool {
+    if j.errorTracker == nil {
+        j.errorTracker = make(map[string]*ErrorTracker)
+    }
+    
+    tracker, exists := j.errorTracker[host]
+    if !exists {
+        j.errorTracker[host] = &ErrorTracker{
+            ErrorCount: 0,
+            MaxRetries: 50,
+        }
+        return false
+    }
+    
+    return tracker.ErrorCount >= tracker.MaxRetries
+}
+
+
+func (j *Job) isDuplicateResponse(resp Response) bool {
+    if j.seenResponses == nil {
+        j.seenResponses = make(map[ResponseSignature]bool)
+    }
+
+    signature := ResponseSignature{
+        StatusCode: resp.StatusCode,
+        Size:      resp.ContentLength,
+        Words:     resp.ContentWords,
+    }
+
+    if j.seenResponses[signature] {
+        return true
+    }
+
+    j.seenResponses[signature] = true
+    return false
+}
+
+
+
+
 func setupDefaultAutocalibrationStrategies() error {
 	basic_strategy := AutocalibrationStrategy{
 		"basic_admin":  []string{"admin" + RandomString(16), "admin" + RandomString(8)},
@@ -81,26 +123,49 @@ func setupDefaultAutocalibrationStrategies() error {
 }
 
 func (j *Job) calibrationRequest(inputs map[string][]byte) (Response, error) {
-	basereq := BaseRequest(j.Config)
-	req, err := j.Runner.Prepare(inputs, &basereq)
-	if err != nil {
-		j.Output.Error(fmt.Sprintf("Encountered an error while preparing autocalibration request: %s\n", err))
-		j.incError()
-		log.Printf("%s", err)
-		return Response{}, err
-	}
-	resp, err := j.Runner.Execute(&req)
-	if err != nil {
-		j.Output.Error(fmt.Sprintf("Encountered an error while executing autocalibration request: %s\n", err))
-		j.incError()
-		log.Printf("%s", err)
-		return Response{}, err
-	}
-	// Only calibrate on responses that would be matched otherwise
-	if j.isMatch(resp) {
-		return resp, nil
-	}
-	return resp, fmt.Errorf("Response wouldn't be matched")
+    basereq := BaseRequest(j.Config)
+    req, err := j.Runner.Prepare(inputs, &basereq)
+    if err != nil {
+        j.Output.Error(fmt.Sprintf("Encountered an error while preparing autocalibration request: %s\n", err))
+        j.incError()
+        
+        // Track errors for the host
+        host := HostURLFromRequest(req)
+        if j.errorTracker[host] == nil {
+            j.errorTracker[host] = &ErrorTracker{MaxRetries: 50}
+        }
+        j.errorTracker[host].ErrorCount++
+        
+        log.Printf("%s", err)
+        return Response{}, err
+    }
+    
+    resp, err := j.Runner.Execute(&req)
+    if err != nil {
+        j.Output.Error(fmt.Sprintf("Encountered an error while executing autocalibration request: %s\n", err))
+        j.incError()
+        
+        // Track errors for the host
+        host := HostURLFromRequest(req)
+        if j.errorTracker[host] == nil {
+            j.errorTracker[host] = &ErrorTracker{MaxRetries: 50}
+        }
+        j.errorTracker[host].ErrorCount++
+        
+        log.Printf("%s", err)
+        return Response{}, err
+    }
+
+    // Check if this is a duplicate response
+    if j.isDuplicateResponse(resp) {
+        return resp, fmt.Errorf("Duplicate response signature")
+    }
+
+    // Only calibrate on responses that would be matched otherwise
+    if j.isMatch(resp) {
+        return resp, nil
+    }
+    return resp, fmt.Errorf("Response wouldn't be matched")
 }
 
 // CalibrateForHost runs autocalibration for a specific host
@@ -162,15 +227,21 @@ func (j *Job) Calibrate(input map[string][]byte) error {
 //
 //	configuring the filters accordingly
 func (j *Job) CalibrateIfNeeded(host string, input map[string][]byte) error {
-	j.calibMutex.Lock()
-	defer j.calibMutex.Unlock()
-	if !j.Config.AutoCalibration {
-		return nil
-	}
-	if j.Config.AutoCalibrationPerHost {
-		return j.CalibrateForHost(host, input)
-	}
-	return j.Calibrate(input)
+    j.calibMutex.Lock()
+    defer j.calibMutex.Unlock()
+    
+    // Check if we should skip this URL due to too many errors
+    if j.shouldSkipURL(host) {
+        return fmt.Errorf("Skipping URL due to too many errors: %s", host)
+    }
+    
+    if !j.Config.AutoCalibration {
+        return nil
+    }
+    if j.Config.AutoCalibrationPerHost {
+        return j.CalibrateForHost(host, input)
+    }
+    return j.Calibrate(input)
 }
 
 func (j *Job) calibrateFilters(responses []Response, perHost bool) error {
