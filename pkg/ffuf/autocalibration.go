@@ -62,27 +62,48 @@ func (j *Job) shouldSkipURL(host string) bool {
     return tracker.ErrorCount >= tracker.MaxRetries
 }
 
-
 func (j *Job) isDuplicateResponse(resp Response) bool {
     if j.seenResponses == nil {
         j.seenResponses = make(map[ResponseSignature]bool)
     }
 
-    signature := ResponseSignature{
-        StatusCode: resp.StatusCode,
+    // Create current response signature
+    currentSignature := ResponseSignature{
+        StatusCode: int64(resp.StatusCode),
         Size:      resp.ContentLength,
         Words:     resp.ContentWords,
+        Lines:     resp.ContentLines,
     }
 
-    if j.seenResponses[signature] {
-        return true
+    // Check all existing signatures
+    for signature := range j.seenResponses {
+        // First check: Status codes must match
+        if signature.StatusCode != currentSignature.StatusCode {
+            continue
+        }
+
+        // Count matching attributes (Size, Words, Lines)
+        matchCount := 0
+        if signature.Size == currentSignature.Size {
+            matchCount++
+        }
+        if signature.Words == currentSignature.Words {
+            matchCount++
+        }
+        if signature.Lines == currentSignature.Lines {
+            matchCount++
+        }
+
+        // If 2 or more attributes match, consider it a duplicate
+        if matchCount >= 2 {
+            return true
+        }
     }
 
-    j.seenResponses[signature] = true
+    // If we get here, this is a unique response
+    j.seenResponses[currentSignature] = true
     return false
 }
-
-
 
 
 func setupDefaultAutocalibrationStrategies() error {
