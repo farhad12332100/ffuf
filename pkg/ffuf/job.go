@@ -13,34 +13,51 @@ import (
 
 // Job ties together Config, Runner, Input and Output
 type Job struct {
-	Config               *Config
-	ErrorMutex           sync.Mutex
-	Input                InputProvider
-	Runner               RunnerProvider
-	ReplayRunner         RunnerProvider
-	Scraper              Scraper
-	Output               OutputProvider
-	Jobhash              string
-	Counter              int
-	ErrorCounter         int
-	SpuriousErrorCounter int
-	Total                int
-	Running              bool
-	RunningJob           bool
-	Paused               bool
-	Count403             int
-	Count429             int
-	Error                string
-	Rate                 *RateThrottle
-	startTime            time.Time
-	startTimeJob         time.Time
-	queuejobs            []QueueJob
-	queuepos             int
-	skipQueue            bool
-	currentDepth         int
-	calibMutex           sync.Mutex
-	pauseWg              sync.WaitGroup
+    Config               *Config
+    ErrorMutex           sync.Mutex
+    Input                InputProvider
+    Runner              RunnerProvider
+    ReplayRunner         RunnerProvider
+    Scraper              Scraper
+    Output               OutputProvider
+    Jobhash              string
+    Counter              int
+    ErrorCounter         int
+    SpuriousErrorCounter int
+    Total                int
+    Running              bool
+    RunningJob           bool
+    Paused               bool
+    Count403             int
+    Count429             int
+    Error                string
+    Rate                 *RateThrottle
+    startTime            time.Time
+    startTimeJob         time.Time
+    queuejobs            []QueueJob
+    queuepos             int
+    skipQueue            bool
+    currentDepth         int
+    calibMutex           sync.Mutex
+    pauseWg              sync.WaitGroup
+    // New fields for response deduplication and error tracking
+    seenResponses        map[ResponseSignature]bool
+    errorTracker         map[string]*ErrorTracker
 }
+
+
+type ResponseSignature struct {
+    StatusCode    int64
+    Size          int64
+    Words         int64
+}
+
+type ErrorTracker struct {
+    ErrorCount    int
+    MaxRetries    int
+}
+
+
 
 type QueueJob struct {
 	Url   string
