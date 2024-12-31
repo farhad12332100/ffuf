@@ -65,20 +65,42 @@ func (j *Job) shouldSkipURL(host string) bool {
 
 func (j *Job) isDuplicateResponse(resp Response) bool {
     if j.seenResponses == nil {
-        j.seenResponses = make(map[ResponseSignature]bool)
+        j.seenResponses = make(map[ResponseSignature][]Response)
     }
 
-    signature := ResponseSignature{
-        StatusCode: resp.StatusCode,
-        Size:      resp.ContentLength,
-        Words:     resp.ContentWords,
+    // First check if we have any responses with the same status code
+    for _, seenResp := range j.seenResponses[ResponseSignature{StatusCode: resp.StatusCode}] {
+        if seenResp.StatusCode != resp.StatusCode {
+            continue
+        }
+
+        // Count how many attributes match
+        matchCount := 0
+
+        // Compare Size
+        if seenResp.ContentLength == resp.ContentLength {
+            matchCount++
+        }
+
+        // Compare Words
+        if seenResp.ContentWords == resp.ContentWords {
+            matchCount++
+        }
+
+        // Compare Lines
+        if seenResp.Lines == resp.Lines {
+            matchCount++
+        }
+
+        // If status code is same AND at least 2 other attributes match, consider it duplicate
+        if matchCount >= 2 {
+            return true
+        }
     }
 
-    if j.seenResponses[signature] {
-        return true
-    }
-
-    j.seenResponses[signature] = true
+    // If not duplicate, add to seen responses
+    signature := ResponseSignature{StatusCode: resp.StatusCode}
+    j.seenResponses[signature] = append(j.seenResponses[signature], resp)
     return false
 }
 
@@ -166,6 +188,19 @@ func (j *Job) calibrationRequest(inputs map[string][]byte) (Response, error) {
         return resp, nil
     }
     return resp, fmt.Errorf("Response wouldn't be matched")
+}
+
+
+type Response struct {
+    StatusCode    int
+    ContentLength int64
+    ContentWords  int
+    Lines        int
+}
+
+// ResponseSignature only needs StatusCode now as we're using it as primary key
+type ResponseSignature struct {
+    StatusCode int
 }
 
 // CalibrateForHost runs autocalibration for a specific host
