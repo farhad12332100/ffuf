@@ -43,6 +43,7 @@ type Job struct {
     // New fields for response deduplication and error tracking
     seenResponses        map[ResponseSignature]bool
     errorTracker         map[string]*ErrorTracker
+    seenResponsesMutex   sync.RWMutex 
 }
 
 
@@ -83,6 +84,17 @@ func NewJob(conf *Config) *Job {
     j.seenResponses = make(map[ResponseSignature]bool)
     j.errorTracker = make(map[string]*ErrorTracker)
     return &j
+}
+
+func (j *Job) isNewResponse(signature ResponseSignature) bool {
+    j.seenResponsesMutex.Lock()
+    defer j.seenResponsesMutex.Unlock()
+    
+    if j.seenResponses[signature] {
+        return false
+    }
+    j.seenResponses[signature] = true
+    return true
 }
 
 // incError increments the error counter
