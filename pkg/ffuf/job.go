@@ -413,57 +413,79 @@ func (j *Job) ffufHash(pos int) []byte {
 }
 
 func (j *Job) runTask(input map[string][]byte, position int, retried bool) {
-	basereq := j.queuejobs[j.queuepos-1].req
-	req, err := j.Runner.Prepare(input, &basereq)
-	req.Position = position
-	if err != nil {
-		j.Output.Error(fmt.Sprintf("Encountered an error while preparing request: %s\n", err))
-		j.incError()
-		log.Printf("%s", err)
-		return
-	}
+    basereq := j.queuejobs[j.queuepos-1].req
+    req, err := j.Runner.Prepare(input, &basereq)
+    req.Position = position
+    if err != nil {
+        j.Output.Error(fmt.Sprintf("Encountered an error while preparing request: %s\n", err))
+        j.incError()
+        log.Printf("%s", err)
+        return
+    }
 
-	resp, err := j.Runner.Execute(&req)
-	if err != nil {
-		if retried {
-			j.incError()
-			log.Printf("%s", err)
-		} else {
-			j.runTask(input, position, true)
-		}
-		if os.IsTimeout(err) {
-			for name := range j.Config.MatcherManager.GetMatchers() {
-				if name == "time" {
-					inputmsg := ""
-					for k, v := range input {
-						inputmsg = inputmsg + fmt.Sprintf("%s : %s  // ", k, v)
-					}
-					j.Output.Info("Timeout while 'time' matcher is active: " + inputmsg)
-					return
-				}
-			}
-			for name := range j.Config.MatcherManager.GetFilters() {
-				if name == "time" {
-					inputmsg := ""
-					for k, v := range input {
-						inputmsg = inputmsg + fmt.Sprintf("%s : %s  // ", k, v)
-					}
-					j.Output.Info("Timeout while 'time' filter is active: " + inputmsg)
-					return
-				}
-			}
-		}
-		return
-	}
-	if j.SpuriousErrorCounter > 0 {
-		j.resetSpuriousErrors()
-	}
-	if j.Config.StopOn403 || j.Config.StopOnAll {
-		// Increment Forbidden counter if we encountered one
-		if resp.StatusCode == 403 {
-			j.inc403()
-		}
-	}
+    resp, err := j.Runner.Execute(&req)
+    if err != nil {
+        if retried {
+            j.incError()
+            log.Printf("%s", err)
+        } else {
+            j.runTask(input, position, true)
+        }
+        if os.IsTimeout(err) {
+            for name := range j.Config.MatcherManager.GetMatchers() {
+                if name == "time" {
+                    inputmsg := ""
+                    for k, v := range input {
+                        inputmsg = inputmsg + fmt.Sprintf("%s : %s  // ", k, v)
+                    }
+                    j.Output.Info("Timeout while 'time' matcher is active: " + inputmsg)
+                    return
+                }
+            }
+            for name := range j.Config.MatcherManager.GetFilters() {
+                if name == "time" {
+                    inputmsg := ""
+                    for k, v := range input {
+                        inputmsg = inputmsg + fmt.Sprintf("%s : %s  // ", k, v)
+                    }
+                    j.Output.Info("Timeout while 'time' filter is active: " + inputmsg)
+                    return
+                }
+            }
+        }
+        return
+    }
+
+    // Initialize response tracking if not already done
+    if j.seenResponses == nil {
+        j.seenResponses = make(map[ResponseSignature]bool)
+    }
+
+    // Create signature for this response
+    signature := ResponseSignature{
+        StatusCode: int64(resp.StatusCode),
+        Size:      resp.ContentLength,
+        Words:     resp.ContentWords,
+    }
+
+    // Skip if we've seen this signature before
+    if j.seenResponses[signature] {
+        return
+    }
+
+    // Mark this signature as seen
+    j.seenResponses[signature] = true
+
+    if j.SpuriousErrorCounter > 0 {
+        j.resetSpuriousErrors()
+    }
+    
+    // Rest of the existing code...
+    if j.Config.StopOn403 || j.Config.StopOnAll {
+        if resp.StatusCode == 403 {
+            j.inc403()
+        }
+    }
 	if j.Config.StopOnAll {
 		// increment 429 counter if the response code is 429
 		if resp.StatusCode == 429 {
