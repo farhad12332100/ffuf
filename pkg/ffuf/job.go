@@ -49,20 +49,23 @@ type QueueJob struct {
 }
 
 func NewJob(conf *Config) *Job {
-	var j Job
-	j.Config = conf
-	j.Counter = 0
-	j.ErrorCounter = 0
-	j.SpuriousErrorCounter = 0
-	j.Running = false
-	j.RunningJob = false
-	j.Paused = false
-	j.queuepos = 0
-	j.queuejobs = make([]QueueJob, 0)
-	j.currentDepth = 0
-	j.Rate = NewRateThrottle(conf)
-	j.skipQueue = false
-	return &j
+    var j Job
+    j.Config = conf
+    j.Counter = 0
+    j.ErrorCounter = 0
+    j.SpuriousErrorCounter = 0
+    j.Running = false
+    j.RunningJob = false
+    j.Paused = false
+    j.queuepos = 0
+    j.queuejobs = make([]QueueJob, 0)
+    j.currentDepth = 0
+    j.Rate = NewRateThrottle(conf)
+    j.skipQueue = false
+    // Initialize new maps
+    j.seenResponses = make(map[ResponseSignature]bool)
+    j.errorTracker = make(map[string]*ErrorTracker)
+    return &j
 }
 
 // incError increments the error counter
